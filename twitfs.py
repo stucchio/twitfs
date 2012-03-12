@@ -140,7 +140,7 @@ class TwitFS(Fuse):
     def truncate(self, path, offset):
         if path != "/status":
             return -errno.EACCES
-        self.__is_new_status=Truea
+        self.__is_new_status=True
         self.__new_status = self.__new_status[0:offset]
         return 0
 
