@@ -25,13 +25,10 @@ if not hasattr(fuse, '__version__'):
 
 fuse.fuse_python_api = (0, 2)
 
-hello_path = '/hello'
-hello_str = 'Hello World!\n'
-
 class MyStat(fuse.Stat):
-    def __init__(self, time=0):
-        self.st_mode = 0
-        self.st_ino = 0
+    def __init__(self, time=0, mode=0, ino = 0):
+        self.st_mode = mode
+        self.st_ino = ino
         self.st_dev = 0
         self.st_nlink = 0
         self.st_uid = 0
@@ -53,7 +50,9 @@ CONSUMER_SECRET='8KPpuMx2wvnBYAipG7ViaDTIaJBSQLx5pbXY463up4'
 class TwitFS(Fuse):
     def __init__(self, *args, **kwargs):
         self.twitter = twitter.Twitter(auth=twitter.OAuth(TOKEN, TOKEN_SECRET, CONSUMER, CONSUMER_SECRET))
+        self.__is_new_status = False
         self.__cached_tweets = {}
+        self.__new_status = ""
         Fuse.__init__(self, *args, **kwargs)
 
     def getattr(self, path):
@@ -62,6 +61,10 @@ class TwitFS(Fuse):
         if path == '/':
             st.st_mode = stat.S_IFDIR | 0755
             st.st_nlink = 2
+            return st
+        if path == "/status":
+            st.st_mode = stat.S_IFREG | 0666
+            st.st_size = len(self.__get_status()['text'])
             return st
         try:
             tweet_id = int(path[1:])
@@ -78,20 +81,17 @@ class TwitFS(Fuse):
 
     def readdir(self, path, offset):
         tweet_ids = [ str(t['id']) for t in self.twitter.statuses.home_timeline() ]
-        for r in  ['.', '..'] +  tweet_ids:
+        for r in  ['.', '..', 'status'] +  tweet_ids:
             yield fuse.Direntry(r)
 
-    def __get_tweet(self, id):
-        if not self.__cached_tweets.has_key(id):
-            self.__cached_tweets[id] = self.twitter.statuses.show(id=int(id))
-        return self.__cached_tweets[id]
-
     def open(self, path, flags):
-        try:
+        if path == "/status":
+            return 0 #Always legal to open status
+        try: #For tweets, check if the tweet exists
             data = self.__get_tweet(int(path[1:]))
         except twitter.api.TwitterHTTPError:
             return -errno.ENOENT
-        accmode = os.O_RDONLY | os.O_WRONLY | os.O_RDWR
+        accmode = os.O_RDONLY | os.O_WRONLY | os.O_RDWR #Must be read only for tweets
         if (flags & accmode) != os.O_RDONLY:
             return -errno.EACCES
         return 0
@@ -108,11 +108,56 @@ class TwitFS(Fuse):
         return result
 
     def read(self, path, size, offset):
+        if path == "/status":
+            if self.__is_new_status:
+                status = self.__new_status
+            else:
+                status = self.__get_status()['text']
+            return str(status[offset:offset+size])
         try:
             result = self.__tweet_as_str(int(path[1:]))
             return str(result[offset:offset+size])
         except twitter.api.TwitterHTTPError:
             return -errno.ENOENT
+
+    def write(self, path, buff, offset):
+        self.__is_new_status=True
+        if path != "/status":
+            return -errno.EACCES
+        if offset + len(buff) > 140:
+            return -errno.ENOSPC
+        if len(self.__new_status) < offset:
+            self.__new_status = self.__new_status.ljust(offset) + buff
+        else:
+            self.__new_status = self.__new_status[0:offset] + buff + self.__new_status[offset+len(buff):]
+        return len(buff)
+
+    def release(self, path, flags):
+        if self.__is_new_status:
+            self.__set_status(self.__new_status)
+        return 0
+
+    def truncate(self, path, offset):
+        if path != "/status":
+            return -errno.EACCES
+        self.__is_new_status=Truea
+        self.__new_status = self.__new_status[0:offset]
+        return 0
+
+    def __set_status(self, status):
+        self.__status_tweet = self.twitter.statuses.update(status=status)
+        return self.__status_tweet
+
+    def __get_status(self):
+        if (not hasattr(self, "__status_tweet")):
+            self.__status_tweet = self.twitter.statuses.user_timeline(count=1)[0]
+        return self.__status_tweet
+
+    def __get_tweet(self, id):
+        if not self.__cached_tweets.has_key(id):
+            self.__cached_tweets[id] = self.twitter.statuses.show(id=int(id))
+        return self.__cached_tweets[id]
+
 
 def main():
     server = TwitFS(version="%prog " + fuse.__version__, usage="twitfs", dash_s_do='setsingle')
