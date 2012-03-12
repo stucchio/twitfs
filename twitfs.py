@@ -14,6 +14,8 @@ except ImportError:
     pass
 import fuse
 from fuse import Fuse
+from datetime import datetime
+import time
 import twitter
 
 
@@ -27,7 +29,7 @@ hello_path = '/hello'
 hello_str = 'Hello World!\n'
 
 class MyStat(fuse.Stat):
-    def __init__(self):
+    def __init__(self, time=0):
         self.st_mode = 0
         self.st_ino = 0
         self.st_dev = 0
@@ -35,9 +37,12 @@ class MyStat(fuse.Stat):
         self.st_uid = 0
         self.st_gid = 0
         self.st_size = 0
-        self.st_atime = 0
-        self.st_mtime = 0
-        self.st_ctime = 0
+        self.set_time(time)
+
+    def set_time(self, time):
+        self.st_atime = time
+        self.st_mtime = time
+        self.st_ctime = time
 
 TOKEN='514400263-FsbHAyi9A35MTswWWC0OWvdOu9MYG2wBaINU9xp4'
 TOKEN_SECRET='NgA4ZI0U663pdPKWP9zAtEvVB0rQu89V0dCoCeG0cI'
@@ -59,12 +64,16 @@ class TwitFS(Fuse):
             st.st_nlink = 2
             return st
         try:
-            data = self.__get_tweet(int(path[1:]))
+            tweet_id = int(path[1:])
+            data = self.__tweet_as_str(tweet_id)
             st.st_mode = stat.S_IFREG | 0444
             st.st_nlink = 1
-            st.st_size = len(data['text'])
+            st.st_size = len(data)
+            st.set_time(self.__tweet_time(tweet_id))
             return st
         except twitter.api.TwitterHTTPError:
+            return -errno.ENOENT
+        except ValueError:
             return -errno.ENOENT
 
     def readdir(self, path, offset):
@@ -87,6 +96,11 @@ class TwitFS(Fuse):
             return -errno.EACCES
         return 0
 
+    def __tweet_time(self, id):
+        tweet = self.__get_tweet(id)
+        d = datetime.strptime(tweet['created_at'], '%a %b %d %H:%M:%S +0000 %Y')
+        return time.mktime(d.timetuple())
+
     def __tweet_as_str(self, id):
         tweet = self.__get_tweet(id)
         result = str(tweet['user']['screen_name']) + "\n"
@@ -101,12 +115,7 @@ class TwitFS(Fuse):
             return -errno.ENOENT
 
 def main():
-    usage="""
-    Userspace hello example
-
-    """ + Fuse.fusage
-
-    server = TwitFS(version="%prog " + fuse.__version__, usage=usage, dash_s_do='setsingle')
+    server = TwitFS(version="%prog " + fuse.__version__, usage="twitfs", dash_s_do='setsingle')
 
     server.parse(errex=1)
     server.main()
