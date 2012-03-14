@@ -45,7 +45,6 @@ TOKEN='514400263-FsbHAyi9A35MTswWWC0OWvdOu9MYG2wBaINU9xp4'
 TOKEN_SECRET='NgA4ZI0U663pdPKWP9zAtEvVB0rQu89V0dCoCeG0cI'
 CONSUMER='YKxpG65dN2rPIuqWxoQxTQ'
 CONSUMER_SECRET='8KPpuMx2wvnBYAipG7ViaDTIaJBSQLx5pbXY463up4'
-# Account: twitinpune/4g9fWC1
 
 class TwitFS(Fuse):
     def __init__(self, *args, **kwargs):
